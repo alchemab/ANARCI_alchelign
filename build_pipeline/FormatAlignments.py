@@ -30,7 +30,7 @@ import os, sys
 from subprocess import Popen, PIPE
 from FastaIO import chunkify
 
-amino_acids = sorted(list("QWERTYIPASDFGHKLCVNM"))
+amino_acids = sorted(list("QWERTYIPASDFGHKLCVNMUOBJZX"))
 acid_set = set( amino_acids+["."])
 
 file_path  = os.path.split(__file__)[0]
