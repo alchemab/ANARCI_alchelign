@@ -51,8 +51,7 @@ Author: James Dunbar (dunbar@stats.ox.ac.uk)
 Contact: opig@stats.ox.ac.uk
 
 Copyright (C) 2017 Oxford Protein Informatics Group (OPIG)
-Freely distributed under the BSD 3-Clause Licence.
-'''
+Freely distributed under the GNU General Public License (GPLv3).'''
 import os
 
 def which(name, flags=os.X_OK):
