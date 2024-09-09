@@ -44,15 +44,14 @@ e.g.
     Or just give a single sequence to be numbered. 
 '''
 
-epilogue='''
+epilogue = '''
 Author: James Dunbar (dunbar@stats.ox.ac.uk)
         Charlotte Deane (deane@stats.ox.ac.uk)
 
 Contact: opig@stats.ox.ac.uk
 
 Copyright (C) 2017 Oxford Protein Informatics Group (OPIG)
-Freely distributed under the GNU General Public License (GPLv3).
-'''
+Freely distributed under the GNU General Public License (GPLv3).'''
 import os
 
 def which(name, flags=os.X_OK):
@@ -112,7 +111,8 @@ if __name__ == "__main__":
     parser.add_argument( '--assign_germline', action = 'store_true', default=False, help="Assign the v and j germlines to the sequence. The most sequence identical germline is assigned.", dest="assign_germline")
     parser.add_argument( '--use_species', type=str, help="Use a specific species in the germline assignment. If not specified, only human and mouse germlines will be considered.", choices=all_species, dest="use_species")
     parser.add_argument( '--bit_score_threshold', type=int, default=80, help="Change the bit score threshold used to confirm an alignment should be used.", dest="bit_score_threshold")
-
+    parser.add_argument('--assigned_v_count', type=int, default=1, help="How many of the top assigned V Genes to return", dest="assigned_v_count")
+    parser.add_argument('--assigned_j_count', type=int, default=1, help="How many of the top assigned J Genes to return", dest="assigned_j_count")
     args = parser.parse_args()
 
     ######################
@@ -175,19 +175,29 @@ if __name__ == "__main__":
         allow = allow - set(["A","B","G","D"])
         
     allowed_species = ['human', 'mouse']
+    
     if args.use_species:
         assert args.use_species in all_species, 'Unknown species'
         allowed_species = [args.use_species]
-    
-    
+
+    if args.assigned_v_count:
+        if not args.assign_germline:
+            print("Error: Arguments must include assign_germline in order to use --assigned_v_count", file=sys.stderr)
+            sys.exit(1)
+
+    if args.assigned_j_count:
+        if not args.assign_germline:
+            print("Error: Arguments must include assign_germline in order to use --assigned_j_count", file=sys.stderr)
+            sys.exit(1)
+
     ###########################
     # Do numbering and output #
     ###########################
     try:
-        sequences, numbered, alignment_details, hit_tables =  run_anarci(args.inputsequence, scheme=args.scheme, output=True, 
-                                                          outfile=outfile, csv=args.csv, allow=allow, ncpu=args.ncpu, 
-                                                          assign_germline=args.assign_germline, allowed_species=allowed_species, 
-                                                          bit_score_threshold=args.bit_score_threshold )
+        sequences, numbered, alignment_details, hit_tables = run_anarci(args.inputsequence, scheme=args.scheme, output=True,
+                                                                        outfile=outfile, csv=args.csv, allow=allow, ncpu=args.ncpu,
+                                                                        assign_germline=args.assign_germline, allowed_species=allowed_species,
+                                                                        bit_score_threshold=args.bit_score_threshold, assigned_v_count=args.assigned_v_count, assigned_j_count=args.assigned_j_count)
 
         if hitfile:
             with open( hitfile, "w") as outfile:
