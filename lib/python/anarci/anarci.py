@@ -72,7 +72,7 @@ from .germlines import all_germlines
     
 all_species = list(all_germlines['V']['H'].keys())
 
-amino_acids = sorted(list("QWERTYIPASDFGHKLCVNM"))
+amino_acids = sorted(list("QWERTYIPASDFGHKLCVNMUOBJZX"))
 set_amino_acids = set(amino_acids)
 anarci_path  = os.path.split(__file__)[0]
 
@@ -239,10 +239,8 @@ def anarci_output(numbered, sequences, alignment_details, outfile, sequence_id=N
                     jgene= ','.join(j_gene_names)
                     jid = ','.join(j_gene_scores)
 
-                    # (species, vgene), vid =alignment_details[i][j]['germlines'].get('v_gene', [['', 0]])
                     if vgene is None:
                         vgene, vid = 'unknown', 0
-                    # (_,jgene), jid =alignment_details[i][j]['germlines'].get('j_gene', [['', 0]])
                     if jgene is None:
                         jgene, jid = 'unknown', 0
                     print('#|%s|%s|%s|%s|%s|'%(species, vgene, vid, jgene, jid ), file=outfile)	
