@@ -2,17 +2,10 @@
 #    Copyright (C) 2016 Oxford Protein Informatics Group (OPIG)
 #
 #    This program is free software: you can redistribute it and/or modify
-#    it under the terms of the GNU General Public License as published by
-#    the Free Software Foundation, either version 3 of the License, or
-#    (at your option) any later version.
+#    it under the terms of the BSD 3-Clause License.
 #
-#    This program is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#    GNU General Public License for more details.#
-#
-#    You should have received a copy of the GNU General Public License
-#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#    You should have received a copy of the BSD 3-Clause Licence
+#    along with this program.  If not, see <https://opensource.org/license/bsd-3-clause/>.
 
 '''
 ANARCI - Antigen Receptor Numbering And ClassIfication
@@ -60,6 +53,7 @@ from textwrap import wrap
 from subprocess import Popen, PIPE
 from itertools import groupby, islice
 from multiprocessing import Pool
+import traceback
 
 from Bio.SearchIO.HmmerIO import Hmmer3TextParser as HMMERParser
 
@@ -69,7 +63,7 @@ from .germlines import all_germlines
     
 all_species = list(all_germlines['V']['H'].keys())
 
-amino_acids = sorted(list("QWERTYIPASDFGHKLCVNMUOBJZX"))
+amino_acids = sorted(list("QWERTYIPASDFGHKLCVNM"))
 set_amino_acids = set(amino_acids)
 anarci_path  = os.path.split(__file__)[0]
 
@@ -92,24 +86,31 @@ def read_fasta(filename):
     """
     Read a sequence file and parse as description, string 
     """
-    return [ r for r in fasta_iter(filename) ]
+    # return [ r for r in fasta_iter(filename) ]
+    try:
+        return [r for r in fasta_iter(filename)]
+    except StopIteration:
+        pass  # Do nothing when the generator stops
 
 def fasta_iter(fasta_name):
     """
-    Given a fasta file. yield tuples of header, sequence
+    Given a fasta file, yield tuples of header, sequence
     https://www.biostars.org/p/710/
     """
-    if fasta_name.endswith( '.gz' ): # IOError raised upon iteration if not a real gzip file.
-        fh = gzip.open(fasta_name)
+    if fasta_name.endswith('.gz'):
+        fh = gzip.open(fasta_name, 'rt')  # 'rt' for text mode, required for Python 3
     else:
-        fh = open(fasta_name)
+        fh = open(fasta_name, 'r')
+    
     faiter = (x[1] for x in groupby(fh, lambda line: line[0] == ">"))
+    
     for header in faiter:
-        header = next(header)[1:].strip()
-        #header = header.next()[1:].strip()
-        seq = "".join(s.strip() for s in next(faiter))
-        yield header, seq
-
+        try:
+            header = next(header)[1:].strip()
+            seq = "".join(s.strip() for s in next(faiter))
+            yield header, seq
+        except StopIteration:
+            break
 
 def write_fasta(sequences, f):
     """
@@ -196,13 +197,46 @@ def anarci_output(numbered, sequences, alignment_details, outfile, sequence_id=N
                 if 'germlines' in alignment_details[i][j]:
                     print('# Most sequence-identical germlines', file=outfile)
                     print('#|species|v_gene|v_identity|j_gene|j_identity|', file=outfile)
-                    (species, vgene), vid =alignment_details[i][j]['germlines'].get('v_gene', [['','unknown'],0])
+                    v_genes = alignment_details[i][j]['germlines'].get('v_gene', [])
+
+                    # Create lists to hold the V genes and their scores separately
+                    v_gene_species = []
+                    v_gene_names = []
+                    v_gene_scores = []
+
+                    # Extract the gene names and scores from v_genes
+                    for (species, vgene), score in v_genes:
+                        v_gene_species.append(species)
+                        v_gene_names.append(vgene)
+                        v_gene_scores.append(f"{score:.2f}")
+
+                    # Join the V genes and scores with commas
+                    species = ','.join(v_gene_species)
+                    vgene = ','.join(v_gene_names)
+                    vid = ','.join(v_gene_scores)
+
+                    j_genes = alignment_details[i][j]['germlines'].get('j_gene', [])
+
+                    # Create lists to hold the V genes and their scores separately
+                    j_gene_names = []
+                    j_gene_scores = []
+
+                    # Extract the gene names and scores from j_genes
+                    for (species, jgene), score in j_genes:
+                        j_gene_names.append(jgene)
+                        j_gene_scores.append(f"{score:.2f}")
+
+                    # Join the V genes and scores with commas
+                    jgene= ','.join(j_gene_names)
+                    jid = ','.join(j_gene_scores)
+
+                    # (species, vgene), vid =alignment_details[i][j]['germlines'].get('v_gene', [['', 0]])
                     if vgene is None:
                         vgene, vid = 'unknown', 0
-                    (_,jgene), jid =alignment_details[i][j]['germlines'].get('j_gene', [['','unknown'],0])
+                    # (_,jgene), jid =alignment_details[i][j]['germlines'].get('j_gene', [['', 0]])
                     if jgene is None:
                         jgene, jid = 'unknown', 0
-                    print('#|%s|%s|%.2f|%s|%.2f|'%(species, vgene, vid, jgene, jid ), file=outfile)	
+                    print('#|%s|%s|%s|%s|%s|'%(species, vgene, vid, jgene, jid ), file=outfile)	
                 chain_type = chain_type_to_class[  alignment_details[i][j]["chain_type"] ]
                 print("# Scheme = %s"%alignment_details[i][j]["scheme"], file=outfile)
                 if len( numbered[i][j][0] ) == 0:
@@ -272,20 +306,27 @@ def csv_output(sequences, numbered, details, outfileroot):
                 print(','.join( fields ), file=out)
 
                 # Iterate over the domains identified
-                for i,j in chain_types[cts]:
-                    line = [ sequences[i][0].replace(',',' '),      
-                             str(j),
-                             details[i][j].get('species',''),
-                             details[i][j].get('chain_type',''),
-                             str(details[i][j].get('evalue','')),
-                             str(details[i][j].get('bitscore','')),
-                             str(numbered[i][j][1]),
-                             str(numbered[i][j][2]),
-                             details[i][j].get('germlines',{}).get( 'v_gene',[['',''],0] )[0][0],
-                             details[i][j].get('germlines',{}).get( 'v_gene',[['',''],0] )[0][1],
-                             '%.2f'%details[i][j].get('germlines',{}).get( 'v_gene',[['',''],0] )[1],
-                             details[i][j].get('germlines',{}).get( 'j_gene',[['',''],0] )[0][1],
-                             '%.2f'%details[i][j].get('germlines',{}).get( 'j_gene',[['',''],0] )[1] ]
+                for i, j in chain_types[cts]:
+                    current_details = details[i][j]
+                    germlines = current_details.get('germlines', {})
+                    v_gene_info = germlines.get('v_gene', [['', 0]])
+
+                    j_gene_info = germlines.get('j_gene', [['', ''], 0])
+                    line = [
+                        sequences[i][0].replace(',', ' '),
+                        str(j),
+                        current_details.get('species', ''),
+                        current_details.get('chain_type', ''),
+                        str(current_details.get('evalue', '')),
+                        str(current_details.get('bitscore', '')),
+                        str(numbered[i][j][1]),
+                        str(numbered[i][j][2]),
+                        v_gene_info[0][0][0],
+                        "|".join(v_gene_info[i][0][1] for i in range(0, len(v_gene_info))),
+                        "|".join('%.2f' % v_gene_info[i][1] for i in range(0, len(v_gene_info))),
+                        "|".join(j_gene_info[i][0][1] for i in range(0, len(j_gene_info))),
+                        "|".join('%.2f' % j_gene_info[i][1] for i in range(0, len(j_gene_info))),
+                    ]
 
                     # Hash the numbering. Insertion order has been preserved in the positions sort.
                     d = dict( numbered[i][j][0] )
@@ -523,7 +564,6 @@ def run_hmmer(sequence_list,hmm_database="ALL",hmmerpath="", ncpu=None, bit_scor
         if pr_stderr:
             _f = os.fdopen(output_filehandle) # This is to remove the filedescriptor from the os. I have had problems with it before.
             _f.close()
-            
             raise HMMscanError(pr_stderr)
         results = parse_hmmer_output(output_filehandle, bit_score_threshold=bit_score_threshold, hmmer_species=hmmer_species)
         
@@ -592,8 +632,9 @@ def number_sequence_from_alignment(state_vector, sequence, scheme="imgt", chain_
     else:
         raise AssertionError("Unimplemented numbering scheme %s for chain %s"%( scheme, chain_type))
 
-def number_sequences_from_alignment(sequences, alignments, scheme="imgt", allow=set(["H","K","L","A","B","G","D"]), 
-                                    assign_germline=False, allowed_species=None):
+
+def number_sequences_from_alignment(sequences, alignments, scheme="imgt", allow=set(["H", "K", "L", "A", "B", "G", "D"]),
+                                    assign_germline=False, allowed_species=None, assigned_v_count=1, assigned_j_count=1):
     '''
     Given a list of sequences and a corresponding list of alignments from run_hmmer apply a numbering scheme.
     '''
@@ -622,15 +663,30 @@ def number_sequences_from_alignment(sequences, alignments, scheme="imgt", allow=
                     hit_numbered.append( validate_numbering(number_sequence_from_alignment(state_vector, sequences[i][1], 
                                                             scheme=scheme, chain_type=details["chain_type"]), sequences[i] ) )
                     if assign_germline:
-                        details["germlines"] = run_germline_assignment( state_vector, sequences[i][1], 
-                                                                        details["chain_type"], allowed_species=allowed_species)
-                    hit_details.append( details )
-                except AssertionError as e: # Handle errors. Those I have implemented should be assertion.
+                        details["germlines"] = run_germline_assignment(state_vector, sequences[i][1],
+                                                                       details["chain_type"], allowed_species=allowed_species, assigned_v_count=assigned_v_count, assigned_j_count=assigned_j_count)
+                    hit_details.append(details)
+                # Handle errors. Those I have implemented should be assertion.
+                except AssertionError as e:
                     print(str(e), file=sys.stderr)
                     raise e # Validation went wrong. Error message will go to stderr. Want this to be fatal during development.
                 except Exception as e:
-                    print("Error: Something really went wrong that has not been handled", file=sys.stderr)
+                    print(
+                        "Error: Something really went wrong that has not been handled", file=sys.stderr)
                     print(str(e), file=sys.stderr)
+
+                    # Get the current exception information
+                    exc_type, exc_value, exc_traceback = sys.exc_info()
+
+                    # Extract the last traceback object
+                    tb = traceback.extract_tb(exc_traceback)
+
+                    # Get the filename, line number, and function name
+                    filename, line_number, func_name, text = tb[-1]
+
+                    print(f"""Error occurred in file '{filename}', line {line_number}, in {func_name}""", file=sys.stderr)
+                    print(f"Line causing the error: {text}", file=sys.stderr)
+
                     raise e
                 
         if hit_numbered: 
@@ -661,47 +717,53 @@ def get_identity( state_sequence, germline_sequence ):
     return float(m)/n
     
 
-def run_germline_assignment(state_vector, sequence, chain_type, allowed_species=None ):
+def run_germline_assignment(state_vector, sequence, chain_type, allowed_species=None, assigned_v_count=1, assigned_j_count=1):
     """
-    Find the closest sequence identity match.
+    Find the closest sequence identity match(es).
     """
-    genes={'v_gene': [None,None],
-           'j_gene': [None,None],
-         }
+    genes = {'v_gene': [], 'j_gene': []}
 
-
-    # Extract the positions that correspond to match (germline) states. 
-    state_dict = dict( ((i, 'm'),None) for i in range(1,129))
+    # Extract the positions that correspond to match (germline) states.
+    state_dict = dict(((i, 'm'), None) for i in range(1, 129))
     state_dict.update(dict(state_vector))
-    state_sequence = "".join([ sequence[state_dict[(i, 'm')]] if state_dict[(i,'m')] is not None else "-" for i in range(1,129) ])
+    state_sequence = "".join([sequence[state_dict[(i, 'm')]] if state_dict[(
+        i, 'm')] is not None else "-" for i in range(1, 129)])
 
     # Iterate over the v-germline sequences of the chain type of interest.
-    # The maximum sequence identity is used to assign the germline 
     if chain_type in all_germlines["V"]:
         if allowed_species is not None:
-            if not all( [ sp in all_germlines['V'][chain_type] for sp in allowed_species ] ): # Made non-fatal
+            if not all([sp in all_germlines['V'][chain_type] for sp in allowed_species]):
                 return {}
         else:
             allowed_species = all_species
+
         seq_ids = {}
         for species in allowed_species:
-            if species not in all_germlines["V"][ chain_type ]: continue # Previously bug.
-            for gene, germline_sequence in all_germlines["V"][ chain_type ][ species ].items():
-                seq_ids[ (species, gene) ] = get_identity( state_sequence , germline_sequence )
-        genes['v_gene' ][0] = max( seq_ids, key=lambda x: seq_ids[x] )
-        genes['v_gene' ][1] = seq_ids[ genes['v_gene' ][0] ]
-        
-        # Use the assigned species for the v-gene for the j-gene. 
-        # This assumption may affect exotically engineered abs but in general is fair.
-        species = genes['v_gene' ][0][0]       
-        if chain_type in all_germlines["J"]:
-            if species in all_germlines["J"][chain_type]:
-                seq_ids = {}
-                for gene, germline_sequence in all_germlines["J"][ chain_type ][ species ].items():
-                    seq_ids[ (species, gene) ] = get_identity( state_sequence , germline_sequence )
-                genes['j_gene' ][0] = max( seq_ids, key=lambda x: seq_ids[x] )
-                genes['j_gene' ][1] = seq_ids[ genes['j_gene' ][0] ]
-     
+            if species not in all_germlines["V"][chain_type]:
+                continue
+            for gene, germline_sequence in all_germlines["V"][chain_type][species].items():
+                seq_ids[(species, gene)] = get_identity(
+                    state_sequence, germline_sequence)
+        # Sort V genes by sequence identity and take the top 'assigned_v_count'
+        top_v_genes = sorted(seq_ids.items(), key=lambda x: x[1], reverse=True)[
+            :assigned_v_count]
+        genes['v_gene'] = [[gene, identity]
+                           for (gene, identity) in top_v_genes]
+
+    # Use the assigned species for the v-gene for the j-gene.
+    if genes['v_gene']:
+        species = genes['v_gene'][0][0][0]
+        if chain_type in all_germlines["J"] and species in all_germlines["J"][chain_type]:
+            seq_ids = {}
+            for gene, germline_sequence in all_germlines["J"][chain_type][species].items():
+                seq_ids[(species, gene)] = get_identity(
+                    state_sequence, germline_sequence)
+
+            # Sort J genes by sequence identity and take the top 'assigned_j_count'
+            top_j_genes = sorted(seq_ids.items(), key=lambda x: x[1], reverse=True)[
+                :assigned_j_count]
+            genes['j_gene'] = [[gene, identity]
+                               for (gene, identity) in top_j_genes]
     return genes
 
 def check_for_j( sequences, alignments, scheme ):
@@ -741,7 +803,8 @@ def check_for_j( sequences, alignments, scheme ):
                             # Sandwich the presumed CDR3 region between the V and J regions.
 
                             vRegion   = ali[:cys_ai+1]
-                            jRegion   = [ (state, index+cys_si+1) for state, index in re_states[0] if state[0] >= 117 ]
+                            # jRegion   = [ (state, index+cys_si+1) for state, index in re_states[0] if state[0] >= 117 ]
+                            jRegion = [(state, index+cys_si+1) for state, index in re_states[0] if (state[0] >= 117) and (index is not None)]
                             cdrRegion = []
                             next = 105
                             for si in range( cys_si+1, jRegion[0][1] ):
@@ -761,10 +824,10 @@ def check_for_j( sequences, alignments, scheme ):
 # High level numbering functions #
 ##################################
 
-# Main function for ANARCI 
-# Name conflict with function, module and package is kept for legacy unless issues are reported in future. 
-def anarci(sequences, scheme="imgt", database="ALL", output=False, outfile=None, csv=False, allow=set(["H","K","L","A","B","G","D"]), 
-           hmmerpath="", ncpu=None, assign_germline=False, allowed_species=['human','mouse'], bit_score_threshold=80):
+# Main function for ANARCI
+# Name conflict with function, module and package is kept for legacy unless issues are reported in future.
+def anarci(sequences, scheme="imgt", database="ALL", output=False, outfile=None, csv=False, allow=set(["H", "K", "L", "A", "B", "G", "D"]),
+           hmmerpath="", ncpu=None, assign_germline=False, allowed_species=['human', 'mouse'], bit_score_threshold=80, assigned_v_count=1, assigned_j_count=1):
     """
     The main function for anarci. Identify antibody and TCR domains, number them and annotate their germline and species. 
 
@@ -799,7 +862,10 @@ def anarci(sequences, scheme="imgt", database="ALL", output=False, outfile=None,
                       default is used. N.B. hmmscan must be compiled with multithreading enabled for this option to have effect. 
                       Please consider using the run_anarci function for native multiprocessing with anarci.
     @param database:  The HMMER database that should be used. Normally not changed unless a custom db is created.
-
+    @param assigned_v_count: The number of assigned germline V Genes to be returned. Only to be used with the assign_germline 
+                      parameter.
+    @param assigned_j_count: The number of assigned germline J Genes to be returned. Only to be used with the assign_germline 
+                      parameter.
 
     @return: Three lists. Numbered, Alignment_details and Hit_tables.
              Each list is in the same order as the input sequences list.
@@ -834,14 +900,16 @@ def anarci(sequences, scheme="imgt", database="ALL", output=False, outfile=None,
     check_for_j( sequences, alignments, scheme )
 
     # Apply the desired numbering scheme to all sequences
-    numbered, alignment_details, hit_tables = number_sequences_from_alignment(sequences, alignments, scheme=scheme, allow=allow, 
-                                                                              assign_germline=assign_germline, 
-                                                                              allowed_species=allowed_species)
+    numbered, alignment_details, hit_tables = number_sequences_from_alignment(sequences, alignments, scheme=scheme, allow=allow,
+                                                                              assign_germline=assign_germline,
+                                                                              allowed_species=allowed_species,
+                                                                              assigned_v_count=assigned_v_count,
+                                                                              assigned_j_count=assigned_j_count)
 
     # Output if necessary
     if output: 
         if csv:
-            csv_output(sequences, numbered, details, outfile)             
+            csv_output(sequences, numbered, details, outfile)
         else:
             outto, close=sys.stdout, False
             if outfile:
@@ -881,7 +949,10 @@ def run_anarci( seq, ncpu=1, **kwargs):
                       default is used. N.B. hmmscan must be compiled with multithreading enabled for this option to have effect. 
                       Please consider using the run_anarci function for native multiprocessing with anarci.
     @param database:  The HMMER database that should be used. Normally not changed unless a custom db is created.
-
+    @param assigned_v_count: The number of assigned germline V Genes to be returned. Only to be used with the assign_germline 
+                      parameter.
+    @param assigned_j_count: The number of assigned germline J Genes to be returned. Only to be used with the assign_germline 
+                      parameter.
     @return: Four lists. Sequences, Numbered, Alignment_details and Hit_tables.
              Each list is in the same order. 
              A description of each entry in the four lists is as followed.
